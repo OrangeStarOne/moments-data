@@ -1,47 +1,48 @@
 // vercel-moments-api/api/publish.js
-// 引入依赖
-const Octokit = require('octokit'); // 修复：降级后用这种方式引入
+// 引入正确的 Octokit v2 版本
+const { Octokit } = require('@octokit/rest');
 const cors = require('cors');
 
-// 1. 解决跨域（测试阶段允许所有域名，后续可限制）
+// 1. 解决跨域（允许所有域名，测试用）
 const corsHandler = cors({ origin: '*' });
 
-// 2. 主函数（Vercel 会自动识别这个导出的函数）
+// 2. 主函数（Vercel 入口）
 module.exports = async (req, res) => {
   // 处理跨域
   await new Promise((resolve) => corsHandler(req, res, resolve));
 
-  // 3. 初始化 GitHub 客户端（适配旧版 Octokit）
-  const octokit = new Octokit({
-    auth: process.env.GITHUB_TOKEN
-  });
+  try {
+    // 3. 读取 Vercel 环境变量
+    const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+    const REPO_OWNER = process.env.REPO_OWNER;
+    const REPO_NAME = process.env.REPO_NAME;
+    const PUBLISH_PWD = process.env.PUBLISH_PWD;
 
-  // 4. 读取 Vercel 环境变量（后续在控制台配置）
-  const REPO_OWNER = process.env.REPO_OWNER; // 你的 GitHub 用户名（小写）
-  const REPO_NAME = process.env.REPO_NAME;   // 数据仓库名（如 moments-data）
-  const PUBLISH_PWD = process.env.PUBLISH_PWD; // 自定义发布密码
+    // ====================== GET 请求：验证接口可用性 ======================
+    if (req.method === 'GET') {
+      return res.status(200).json({
+        success: true,
+        message: '接口已正常访问！',
+        tip: '请用 POST 请求发布动态'
+      });
+    }
 
-  // ====================== 第一步：先验证接口能访问 ======================
-  if (req.method === 'GET') {
-    return res.status(200).json({
-      success: true,
-      message: '接口已正常访问！',
-      tip: '请用 POST 请求发布动态'
-    });
-  }
-
-  // ====================== 第二步：处理 POST 发布请求 ======================
-  if (req.method === 'POST') {
-    try {
-      // 验证环境变量是否配置（防止漏配）
-      if (!process.env.GITHUB_TOKEN || !REPO_OWNER || !REPO_NAME || !PUBLISH_PWD) {
+    // ====================== POST 请求：发布朋友圈 ======================
+    if (req.method === 'POST') {
+      // 验证环境变量是否完整
+      if (!GITHUB_TOKEN || !REPO_OWNER || !REPO_NAME || !PUBLISH_PWD) {
         return res.status(500).json({
           success: false,
           error: 'Vercel 环境变量未配置完整'
         });
       }
 
-      // 解析前端提交的参数
+      // 初始化 Octokit（正确的 v2 版本语法）
+      const octokit = new Octokit({
+        auth: GITHUB_TOKEN
+      });
+
+      // 解析前端参数
       const { content, mediaBase64, password } = req.body;
 
       // 验证发布密码
@@ -52,21 +53,21 @@ module.exports = async (req, res) => {
         });
       }
 
-      // 创建 GitHub Issue（朋友圈动态）
-      const issueTitle = `动态_${new Date().toLocaleString('zh-CN')}`;
-      const { data: issue } = await octokit.request('POST /repos/{owner}/{repo}/issues', {
+      // 1. 创建 GitHub Issue（核心：v2 版本正确的 API 调用方式）
+      const issueResponse = await octokit.issues.create({
         owner: REPO_OWNER,
         repo: REPO_NAME,
-        title: issueTitle,
+        title: `动态_${new Date().toLocaleString('zh-CN')}`,
         body: content?.trim() || '（无文字）'
       });
+      const issueNumber = issueResponse.data.number;
 
-      // 上传媒体文件（如果有）
+      // 2. 上传媒体文件到 Issue 评论（如果有）
       if (mediaBase64) {
-        await octokit.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments', {
+        await octokit.issues.createComment({
           owner: REPO_OWNER,
           repo: REPO_NAME,
-          issue_number: issue.number,
+          issue_number: issueNumber,
           body: `![media](${mediaBase64})`
         });
       }
@@ -75,21 +76,22 @@ module.exports = async (req, res) => {
       return res.status(200).json({
         success: true,
         message: '发布成功！',
-        issueNumber: issue.number
-      });
-
-    } catch (error) {
-      // 捕获所有错误，返回具体信息
-      return res.status(500).json({
-        success: false,
-        error: error.message || '发布失败'
+        issueNumber: issueNumber
       });
     }
-  }
 
-  // ====================== 其他请求方法 ======================
-  return res.status(500).json({
-    success: false,
-    error: '仅支持 GET/POST 请求'
-  });
+    // ====================== 不支持的请求方法 ======================
+    return res.status(405).json({
+      success: false,
+      error: '仅支持 GET/POST 请求'
+    });
+
+  } catch (error) {
+    // 捕获所有错误并返回
+    console.error('执行错误：', error.message);
+    return res.status(500).json({
+      success: false,
+      error: error.message || '服务器内部错误'
+    });
+  }
 };
