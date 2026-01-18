@@ -1,6 +1,6 @@
 // vercel-moments-api/api/publish.js
 // 引入依赖
-const { Octokit } = require('octokit');
+const Octokit = require('octokit'); // 修复：降级后用这种方式引入
 const cors = require('cors');
 
 // 1. 解决跨域（测试阶段允许所有域名，后续可限制）
@@ -11,7 +11,7 @@ module.exports = async (req, res) => {
   // 处理跨域
   await new Promise((resolve) => corsHandler(req, res, resolve));
 
-  // 3. 初始化 GitHub 客户端（从 Vercel 环境变量读取 Token）
+  // 3. 初始化 GitHub 客户端（适配旧版 Octokit）
   const octokit = new Octokit({
     auth: process.env.GITHUB_TOKEN
   });
@@ -34,7 +34,7 @@ module.exports = async (req, res) => {
   if (req.method === 'POST') {
     try {
       // 验证环境变量是否配置（防止漏配）
-      if (!GITHUB_TOKEN || !REPO_OWNER || !REPO_NAME || !PUBLISH_PWD) {
+      if (!process.env.GITHUB_TOKEN || !REPO_OWNER || !REPO_NAME || !PUBLISH_PWD) {
         return res.status(500).json({
           success: false,
           error: 'Vercel 环境变量未配置完整'
@@ -54,7 +54,7 @@ module.exports = async (req, res) => {
 
       // 创建 GitHub Issue（朋友圈动态）
       const issueTitle = `动态_${new Date().toLocaleString('zh-CN')}`;
-      const { data: issue } = await octokit.rest.issues.create({
+      const { data: issue } = await octokit.request('POST /repos/{owner}/{repo}/issues', {
         owner: REPO_OWNER,
         repo: REPO_NAME,
         title: issueTitle,
@@ -63,7 +63,7 @@ module.exports = async (req, res) => {
 
       // 上传媒体文件（如果有）
       if (mediaBase64) {
-        await octokit.rest.issues.createComment({
+        await octokit.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments', {
           owner: REPO_OWNER,
           repo: REPO_NAME,
           issue_number: issue.number,
@@ -88,7 +88,7 @@ module.exports = async (req, res) => {
   }
 
   // ====================== 其他请求方法 ======================
-  return res.status(405).json({
+  return res.status(500).json({
     success: false,
     error: '仅支持 GET/POST 请求'
   });

@@ -11,6 +11,6 @@
   "description": "",
   "dependencies": {
     "cors": "^2.8.5",
-    "octokit": "^5.0.5"
+    "octokit": "^2.0.14"
   }
 }
